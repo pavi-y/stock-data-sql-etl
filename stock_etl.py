@@ -4,28 +4,34 @@ import yfinance as yf
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 from datetime import datetime
+from io import BytesIO
 
 # Function to upload a file to Azure Blob Storage
-def save_to_azure_blob(csv_file_path, account_name, account_key, container_name, blob_name):
+def save_to_azure_blob(dataframe):
     blob_service_client = BlobServiceClient(account_url=f"https://{account_name}.blob.core.windows.net", credential=account_key)
     container_client = blob_service_client.get_container_client(container_name)
     blob_client = container_client.get_blob_client(blob_name)
 
-    with open(csv_file_path, "rb") as data:
-        blob_client.upload_blob(data, overwrite=True)
-    print(f"File {csv_file_path} uploaded to Azure Storage container {container_name} as blob {blob_name}")
+    # Create an in-memory bytes buffer for the DataFrame
+    buffer = BytesIO()
+    # Save the DataFrame as a CSV into the buffer
+    dataframe.to_csv(buffer, index=False)
+    # Seek to the start of the stream
+    buffer.seek(0)
+
+    # Upload the buffer content to the blob
+    blob_client.upload_blob(buffer, blob_type="BlockBlob", overwrite=True)
+    print(f"DataFrame uploaded to Azure Storage container {container_name} as blob {blob_name}")
 
 # Function to extract stock data and save to a CSV file
-def get_stock_data_and_save(symbols, start_date, end_date, csv_file_path):
+def get_stock_data_and_save(symbols, start_date, end_date):
     data = pd.DataFrame()
     for symbol in symbols:
         ticker = yf.Ticker(symbol)
         stock_data = ticker.history(start=start_date, end=end_date)
         stock_data['symbol'] = symbol
         data = pd.concat([data, stock_data])
-    data.to_csv(csv_file_path)
-    print(f"Stock data saved to {csv_file_path}")
-    save_to_azure_blob(csv_file_path, account_name, account_key, container_name, blob_name)
+    return data
 
 # Load environment variables from the .env file
 load_dotenv()
@@ -45,4 +51,5 @@ container_name = os.getenv('AZURE_CONTAINER_NAME')
 blob_name = f'stock_data_{datetime_str}.csv'
 
 # Call the function to extract stock data and save to a CSV file
-get_stock_data_and_save(symbols, start_date, end_date, csv_file_path)
+stock_df = get_stock_data_and_save(symbols, start_date, end_date)
+save_to_azure_blob(stock_df)
